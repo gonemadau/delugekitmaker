@@ -7,5 +7,5 @@ pub mod layout;
 pub mod path;
 
 pub use browse::{default_browse_root, list_dir, DirEntry, DirListing};
-pub use import::{save_kit, BundleMode, SaveOptions, SaveReport};
+pub use import::{save_kit, wav_duration_ms, BundleMode, SaveOptions, SaveReport};
 pub use layout::{list_kits, FsError, KitSummary, SDRoot};

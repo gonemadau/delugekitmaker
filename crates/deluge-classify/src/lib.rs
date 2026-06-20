@@ -116,17 +116,20 @@ pub fn classify(filename: &str) -> Option<DrumCategory> {
 ///
 /// Layout matches Deluge convention — kicks anchor the bottom row, instruments
 /// climb upward to cymbals/FX at the top. Pad 0 = top-left, pad 15 = bottom-right.
+/// Kicks claim the entire bottom row so multiple kicks stack contiguously; if
+/// the kit has fewer kicks, the leftover bottom-row slots fall through to
+/// lower-priority categories.
 ///
-///   00 Crash   01 Ride    02 Tom-Hi  03 FX
+///   00 Crash   01 Ride    02 Tom-Hi  03 FX/Perc
 ///   04 HH-Cl   05 HH-Op   06 Tom-Lo  07 Tom-Mid
-///   08 Clap    09 Rim     10 Perc    11 Perc
-///   12 Kick    13 Kick2   14 Snare   15 Snare2
+///   08 Snare   09 Snare2  10 Clap    11 Rim
+///   12 Kick    13 Kick2   14 Kick3   15 Kick4
 pub fn slots_for(cat: DrumCategory) -> &'static [u8] {
     match cat {
-        DrumCategory::Kick => &[12, 13],
-        DrumCategory::Snare => &[14, 15],
-        DrumCategory::Clap => &[8, 9, 15],
-        DrumCategory::Rim => &[9, 8],
+        DrumCategory::Kick => &[12, 13, 14, 15],
+        DrumCategory::Snare => &[8, 9, 14, 15],
+        DrumCategory::Clap => &[10, 11, 14, 15],
+        DrumCategory::Rim => &[11, 10],
         DrumCategory::ClHat => &[4],
         DrumCategory::OpHat => &[5],
         DrumCategory::TomLow => &[6],
@@ -135,7 +138,7 @@ pub fn slots_for(cat: DrumCategory) -> &'static [u8] {
         DrumCategory::Tom => &[6, 7, 2],
         DrumCategory::Ride => &[1],
         DrumCategory::Crash => &[0],
-        DrumCategory::Perc => &[10, 11, 3],
+        DrumCategory::Perc => &[3, 11, 10],
         DrumCategory::Fx => &[3, 11, 10],
     }
 }
@@ -288,11 +291,23 @@ mod tests {
             .collect();
         let grid = auto_layout(&names);
         assert_eq!(grid[12], Some("kick.wav".to_string()));
-        assert_eq!(grid[14], Some("snare.wav".to_string()));
-        assert_eq!(grid[8], Some("clap.wav".to_string()));
-        assert_eq!(grid[9], Some("rim.wav".to_string()));
+        assert_eq!(grid[8], Some("snare.wav".to_string()));
+        assert_eq!(grid[10], Some("clap.wav".to_string()));
+        assert_eq!(grid[11], Some("rim.wav".to_string()));
         assert_eq!(grid[4], Some("hh.wav".to_string()));
         assert_eq!(grid[5], Some("ohh.wav".to_string()));
+    }
+
+    #[test]
+    fn four_kicks_stack_along_the_bottom_row() {
+        let names: Vec<String> = (1..=4)
+            .map(|i| format!("kick_{}.wav", i))
+            .collect();
+        let grid = auto_layout(&names);
+        assert_eq!(grid[12], Some("kick_1.wav".to_string()));
+        assert_eq!(grid[13], Some("kick_2.wav".to_string()));
+        assert_eq!(grid[14], Some("kick_3.wav".to_string()));
+        assert_eq!(grid[15], Some("kick_4.wav".to_string()));
     }
 
     #[test]
@@ -321,6 +336,6 @@ mod tests {
         existing[3] = Some("snare.wav".into());
         let grid = auto_arrange(&existing);
         assert_eq!(grid[12], Some("kick.wav".to_string()));
-        assert_eq!(grid[14], Some("snare.wav".to_string()));
+        assert_eq!(grid[8], Some("snare.wav".to_string()));
     }
 }

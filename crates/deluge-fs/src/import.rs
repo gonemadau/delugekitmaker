@@ -69,6 +69,9 @@ pub fn save_kit(
         }
         // Decide if path is absolute (needs copy) or SD-relative (already in place).
         let p = Path::new(&osc.file_name);
+        // Track the absolute path of the *final* sample on disk so we can read
+        // its WAV header below.
+        let final_abs: PathBuf;
         if p.is_absolute() {
             let src = p.to_path_buf();
             let stem = src
@@ -89,8 +92,23 @@ pub fn save_kit(
                 copied.push(final_rel.clone());
             }
             osc.file_name = final_rel;
+            final_abs = final_dest;
+        } else {
+            // Already SD-relative — resolve against root for header read.
+            final_abs = root.root().join(osc.file_name.replace('/', std::path::MAIN_SEPARATOR_STR));
         }
-        // else: assume it's already SD-relative; leave alone
+
+        // Populate zone milliseconds from the actual WAV header so the Deluge
+        // gets a real, non-zero zone. Existing non-zero values are preserved
+        // (the user may have trimmed in the UI).
+        if let Ok(duration_ms) = wav_duration_ms(&final_abs) {
+            if osc.end_ms == 0 {
+                osc.end_ms = duration_ms;
+            }
+            // start_ms remains whatever the caller set (default 0).
+        } else {
+            tracing::warn!("could not read WAV header for {}", final_abs.display());
+        }
     }
 
     let flavor = match options.flavor.as_str() {
@@ -141,6 +159,17 @@ fn atomic_copy_with_dedup(src: &Path, dest: &Path) -> std::io::Result<PathBuf> {
     fs::copy(src, &tmp)?;
     fs::rename(&tmp, &try_dest)?;
     Ok(try_dest)
+}
+
+/// Read just the WAV header and return the duration in whole milliseconds.
+/// `hound::WavReader::open` parses only the header (it doesn't decode the
+/// samples), so this is cheap even on large files.
+pub fn wav_duration_ms(path: &Path) -> Result<u32, hound::Error> {
+    let reader = hound::WavReader::open(path)?;
+    let spec = reader.spec();
+    let frames = reader.duration() as u64; // hound's `duration` = sample frames per channel
+    let sr = spec.sample_rate.max(1) as u64;
+    Ok(((frames * 1000) / sr) as u32)
 }
 
 fn sha1_of_file(path: &Path) -> std::io::Result<String> {

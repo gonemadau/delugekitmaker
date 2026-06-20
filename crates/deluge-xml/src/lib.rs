@@ -12,6 +12,6 @@ mod parse;
 mod write;
 
 pub use error::{XmlError, XmlResult};
-pub use kit::{Drum, Flavor, Kit, LoopMode, OscSample, PadParams};
+pub use kit::{Drum, Flavor, Kit, LoopMode, OscSample, PadParams, PAD_TO_XML, XML_TO_PAD};
 pub use parse::parse_kit;
 pub use write::write_kit;

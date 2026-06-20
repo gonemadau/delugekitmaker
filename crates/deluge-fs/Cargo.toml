@@ -10,6 +10,7 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 sha1 = { workspace = true }
 hex = { workspace = true }
+hound = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

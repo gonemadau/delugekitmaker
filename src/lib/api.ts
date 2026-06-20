@@ -12,6 +12,8 @@ export interface OscSample {
   file_name: string;
   start_samples: number;
   end_samples: number;
+  start_ms: number;
+  end_ms: number;
   transpose: number;
   cents: number;
   reversed: boolean;

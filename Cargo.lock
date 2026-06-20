@@ -659,6 +659,7 @@ dependencies = [
  "deluge-classify",
  "deluge-xml",
  "hex",
+ "hound",
  "serde",
  "sha1",
  "thiserror 1.0.69",

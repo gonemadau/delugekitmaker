@@ -34,6 +34,8 @@
   <div class="flex items-center gap-2">
     {#if savedLabel}
       <span class="text-[11px] text-[color:var(--color-accent)]">{savedLabel}</span>
+    {:else if appStore.activeDirty}
+      <span class="text-[11px] text-[color:var(--color-accent-warm)]">● unsaved</span>
     {/if}
     <button
       class="flex items-center gap-2 rounded-md border border-border bg-bg-2 px-3 py-1.5 text-xs text-text-dim transition-colors hover:bg-bg-3 hover:text-text disabled:opacity-50"
@@ -45,7 +47,13 @@
       Auto-arrange
     </button>
     <button
-      class="flex items-center gap-2 rounded-md border border-border bg-bg-2 px-3 py-1.5 text-xs text-text-dim transition-colors hover:bg-bg-3 hover:text-text disabled:opacity-50"
+      class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
+      class:save-dirty={appStore.activeDirty}
+      class:border-border={!appStore.activeDirty}
+      class:bg-bg-2={!appStore.activeDirty}
+      class:text-text-dim={!appStore.activeDirty}
+      class:hover:bg-bg-3={!appStore.activeDirty}
+      class:hover:text-text={!appStore.activeDirty}
       onclick={onSave}
       disabled={!appStore.activeKit || !appStore.sdRoot || saving}
       title="Save kit (Ctrl+S)"
@@ -63,3 +71,15 @@
     </button>
   </div>
 </div>
+
+<style>
+  .save-dirty {
+    background: var(--color-accent-warm);
+    border-color: var(--color-accent-warm);
+    color: var(--color-bg-0);
+    font-weight: 600;
+  }
+  .save-dirty:hover {
+    filter: brightness(1.08);
+  }
+</style>

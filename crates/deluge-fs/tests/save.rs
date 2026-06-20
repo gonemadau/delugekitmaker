@@ -84,12 +84,17 @@ fn save_kit_bundles_into_kit_subfolder() {
     assert!(xml_text.contains("KITS/DropTest/909_KICK.WAV"));
     assert!(xml_text.contains("KITS/DropTest/909_SNARE.WAV"));
 
-    // Round-trip parse the saved XML.
+    // Round-trip parse the saved XML. Empty pads are not emitted, so only the
+    // two drums with samples are reparsed.
     let reparsed = parse_kit(&xml_text).expect("reparse saved");
-    assert_eq!(reparsed.drums.len(), 4);
-    assert_eq!(reparsed.drums[0].name, "Kick");
-    assert_eq!(reparsed.drums[0].osc1.as_ref().unwrap().file_name, "KITS/DropTest/909_KICK.WAV");
-    assert_eq!(reparsed.drums[1].osc1.as_ref().unwrap().file_name, "KITS/DropTest/909_SNARE.WAV");
+    assert_eq!(reparsed.drums.len(), 16);
+    let kick = reparsed.drums.iter().find(|d| d.name == "Kick").unwrap();
+    let snare = reparsed.drums.iter().find(|d| d.name == "Snare").unwrap();
+    assert_eq!(kick.osc1.as_ref().unwrap().file_name, "KITS/DropTest/909_KICK.WAV");
+    assert_eq!(snare.osc1.as_ref().unwrap().file_name, "KITS/DropTest/909_SNARE.WAV");
+    // The writer must have filled end_ms from the WAV header (non-zero zones).
+    assert!(kick.osc1.as_ref().unwrap().end_ms > 0, "kick zone must be non-empty");
+    assert!(snare.osc1.as_ref().unwrap().end_ms > 0, "snare zone must be non-empty");
 }
 
 #[test]

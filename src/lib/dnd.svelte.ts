@@ -138,12 +138,12 @@ class DndManager {
       return;
     }
     if (p.type === "files" && p.paths.length > 0) {
-      // Only assign the first path synchronously; defer the rest so the heavy
-      // reactivity cascade for one drop doesn't run inside a long sync chain.
-      appStore.assignSampleToPad(targetPadIdx, p.paths[0]);
-      if (p.paths.length > 1) {
-        const rest = p.paths.slice(1);
-        queueMicrotask(() => void appStore.addFilesToKit(rest));
+      if (p.paths.length === 1) {
+        appStore.assignSampleToPad(targetPadIdx, p.paths[0]);
+      } else {
+        // Multi-file drop: batch all assignments into one reactivity cycle.
+        // Hint the dropped pad as the home for the first file.
+        void appStore.addFilesToKit(p.paths, targetPadIdx);
       }
     }
   }

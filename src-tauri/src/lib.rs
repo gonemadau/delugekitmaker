@@ -184,7 +184,15 @@ fn open_kit(state: tauri::State<'_, AppState>, rel_path: String) -> Result<Kit, 
     let path = root.root().join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
     let xml = std::fs::read_to_string(&path)
         .map_err(|e| AppError::Other(format!("read {}: {}", path.display(), e)))?;
-    parse_kit(&xml).map_err(|e| AppError::Other(format!("parse: {}", e)))
+    let mut kit = parse_kit(&xml).map_err(|e| AppError::Other(format!("parse: {}", e)))?;
+    // Kit name lives in the filename, not the XML — populate it so tabs render
+    // a real label and duplicate-detection works on subsequent clicks.
+    if kit.name.is_empty() {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            kit.name = stem.to_string();
+        }
+    }
+    Ok(kit)
 }
 
 #[tauri::command]

@@ -242,8 +242,10 @@ class AppStore {
     if (!kit) return null;
     try {
       this.loading = true;
+      const savedIndex = this.activeKitIndex;
       const report = await api.saveKitToDisk(kit, bundleMode);
       await this.refreshKits();
+      this.markClean(savedIndex);
       return report;
     } catch (e: any) {
       this.error = `save: ${String(e?.msg ?? e)}`;
@@ -253,10 +255,55 @@ class AppStore {
     }
   }
 
+  /// Per-tab dirty flag: keyed by openKits index. Set true on any mutation,
+  /// cleared on successful save.
+  dirty = $state<Record<number, boolean>>({});
+
+  isDirty(kitIndex: number): boolean {
+    return !!this.dirty[kitIndex];
+  }
+
+  get activeDirty(): boolean {
+    return this.activeKitIndex >= 0 && this.isDirty(this.activeKitIndex);
+  }
+
+  get anyDirty(): boolean {
+    return Object.values(this.dirty).some((v) => v);
+  }
+
+  markDirty(kitIndex?: number) {
+    const idx = kitIndex ?? this.activeKitIndex;
+    if (idx < 0) return;
+    if (!this.dirty[idx]) {
+      this.dirty = { ...this.dirty, [idx]: true };
+    }
+  }
+
+  markClean(kitIndex?: number) {
+    const idx = kitIndex ?? this.activeKitIndex;
+    if (idx < 0) return;
+    if (this.dirty[idx]) {
+      const next = { ...this.dirty };
+      delete next[idx];
+      this.dirty = next;
+    }
+  }
+
   /// Mutate the active kit by replacing it with a new object; needed so Svelte
-  /// reactivity picks up nested array changes.
+  /// reactivity picks up nested array changes. Also flags the kit as dirty.
   private bumpActiveKit() {
     this.openKits = this.openKits.slice();
+    this.markDirty();
+  }
+
+  /// Rename the active kit. Sanitised on save (fs layer enforces FAT32 rules).
+  renameActiveKit(name: string) {
+    const kit = this.activeKit;
+    if (!kit) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    kit.name = trimmed;
+    this.bumpActiveKit();
   }
 
   /// Swap two pads in the active kit (used by drag-to-reorder).
@@ -316,26 +363,41 @@ class AppStore {
     }
   }
 
-  /// Place a list of file paths into the active kit using the classifier's
-  /// priority order. Skips slots that already have samples (additive behaviour).
-  async addFilesToKit(absPaths: string[]) {
+  /// Place a list of file paths into the active kit. Mutations are *batched* —
+  /// one reactivity cycle at the end, instead of one per file (which previously
+  /// locked the UI on multi-file drops).
+  ///
+  /// If `firstPadHint` is given, the first file is pinned to that pad and the
+  /// rest are classified into empty slots around it. Empty pads with no hint
+  /// land on slots from `slots_for(category)` first, then fill remaining empties
+  /// in scan order.
+  async addFilesToKit(absPaths: string[], firstPadHint?: number) {
     if (absPaths.length === 0) return;
     const kit = this.activeKit;
     if (!kit) return;
     try {
       const imported = await api.importDroppedPaths(absPaths);
-      // Build a working layout: existing pads + new ones. New ones fill
-      // empty slots first by the classifier's pad_index, then overflow to
-      // any other empty pad in scan order.
+
+      // Collect target indices first; defer all mutations to a single batch.
       const emptyByPref: Set<number> = new Set();
       for (let i = 0; i < kit.drums.length; i++) {
         if (!kit.drums[i].osc1?.file_name) emptyByPref.add(i);
       }
+
+      const assignments: Array<[number, string]> = [];
+      let remaining = imported;
+
+      if (firstPadHint !== undefined && imported.length > 0 && firstPadHint >= 0) {
+        assignments.push([firstPadHint, imported[0].abs_path]);
+        emptyByPref.delete(firstPadHint);
+        remaining = imported.slice(1);
+      }
+
       const overflow: string[] = [];
-      for (const s of imported) {
+      for (const s of remaining) {
         const wanted = s.pad_index ?? -1;
         if (wanted >= 0 && emptyByPref.has(wanted)) {
-          this.assignSampleToPad(wanted, s.abs_path);
+          assignments.push([wanted, s.abs_path]);
           emptyByPref.delete(wanted);
         } else {
           overflow.push(s.abs_path);
@@ -344,37 +406,58 @@ class AppStore {
       for (const path of overflow) {
         const next = [...emptyByPref][0];
         if (next === undefined) break;
-        this.assignSampleToPad(next, path);
+        assignments.push([next, path]);
         emptyByPref.delete(next);
       }
+
+      if (assignments.length === 0) return;
+
+      // Single batched mutation — one bump, one dirty mark, one render pass.
+      for (const [padIdx, path] of assignments) {
+        if (padIdx < 0 || padIdx >= kit.drums.length) continue;
+        kit.drums[padIdx] = this.buildDrumFor(path);
+      }
+      this.bumpActiveKit();
+      // Focus the first newly-assigned pad so PadDetail shows something useful.
+      this.selectedPad = assignments[0][0];
     } catch (e: any) {
       this.error = `add: ${String(e?.msg ?? e)}`;
     }
   }
 
-  /// Assign an absolute on-disk WAV path to a pad. If the pad already has a
-  /// sample, it's overwritten.
+  /// Build a drum object pointing at an absolute on-disk WAV path. Pure helper —
+  /// callers are responsible for assigning into `kit.drums[i]` and bumping
+  /// reactivity. Centralised so the various assign paths stay in sync.
+  private buildDrumFor(absPath: string) {
+    const baseName = absPath.split(/[\\/]/).pop() ?? "sample";
+    const stem = baseName.replace(/\.[Ww][Aa][Vv]$/, "");
+    return {
+      name: stem,
+      osc1: {
+        file_name: absPath,
+        start_samples: 0,
+        end_samples: 0,
+        start_ms: 0,
+        end_ms: 0,
+        transpose: 0,
+        cents: 0,
+        reversed: false,
+        loop_mode: 0,
+      },
+      volume_hex: null,
+      pan_hex: null,
+    };
+  }
+
+  /// Assign a single WAV to a pad and bump reactivity. Use [`addFilesToKit`]
+  /// for multi-file drops — that path batches the mutations to avoid a
+  /// reactivity-cascade pile-up.
   assignSampleToPad(padIndex: number, absPath: string) {
     try {
       const kit = this.activeKit;
       if (!kit) return;
       if (padIndex < 0 || padIndex >= kit.drums.length) return;
-      const baseName = absPath.split(/[\\/]/).pop() ?? "sample";
-      const stem = baseName.replace(/\.[Ww][Aa][Vv]$/, "");
-      kit.drums[padIndex] = {
-        name: stem,
-        osc1: {
-          file_name: absPath,
-          start_samples: 0,
-          end_samples: 0,
-          transpose: 0,
-          cents: 0,
-          reversed: false,
-          loop_mode: 0,
-        },
-        volume_hex: null,
-        pan_hex: null,
-      };
+      kit.drums[padIndex] = this.buildDrumFor(absPath);
       this.bumpActiveKit();
       this.selectedPad = padIndex;
     } catch (e: any) {
@@ -473,16 +556,7 @@ class AppStore {
       for (const s of imported) {
         const pad = s.pad_index ?? -1;
         if (pad < 0 || pad >= kit.drums.length) continue;
-        kit.drums[pad].name = s.file_name.replace(/\.[Ww][Aa][Vv]$/, "");
-        kit.drums[pad].osc1 = {
-          file_name: s.abs_path,
-          start_samples: 0,
-          end_samples: 0,
-          transpose: 0,
-          cents: 0,
-          reversed: false,
-          loop_mode: 0,
-        };
+        kit.drums[pad] = this.buildDrumFor(s.abs_path);
       }
       // Trigger reactivity by reassigning openKits
       this.openKits = this.openKits.slice();
@@ -534,7 +608,12 @@ class AppStore {
       this.loading = true;
       this.error = null;
       const kit = await api.openKit(summary.rel_path);
-      // Avoid duplicates
+      // Belt-and-suspenders: ensure the kit has a name even if the backend
+      // somehow left it empty (older binaries before the open_kit fix).
+      if (!kit.name) kit.name = summary.name;
+      // Dedupe by the SD-relative path so two different files with the same
+      // display name still open separately, and the same file twice doesn't
+      // pile up tabs.
       const existing = this.openKits.findIndex(
         (k) => k.name === summary.name,
       );
@@ -544,7 +623,8 @@ class AppStore {
         this.openKits = [...this.openKits, kit];
         this.activeKitIndex = this.openKits.length - 1;
       }
-      // Auto-select the first pad with a sample, so the detail panel populates.
+      // Loading a kit isn't a user edit — keep it clean.
+      this.markClean(this.activeKitIndex);
       const firstWithSample = kit.drums.findIndex((d) => d.osc1?.file_name);
       this.selectedPad = firstWithSample >= 0 ? firstWithSample : 0;
     } catch (e: any) {
@@ -569,7 +649,22 @@ class AppStore {
   }
 
   closeKit(index: number) {
+    if (this.isDirty(index)) {
+      const name = this.openKits[index]?.name ?? `Kit ${index + 1}`;
+      const ok = window.confirm(
+        `"${name}" has unsaved changes. Close anyway?`
+      );
+      if (!ok) return;
+    }
     this.openKits = this.openKits.filter((_, i) => i !== index);
+    // Shift dirty flags down to account for the removed index.
+    const next: Record<number, boolean> = {};
+    for (const [k, v] of Object.entries(this.dirty)) {
+      const i = Number(k);
+      if (i === index) continue;
+      next[i < index ? i : i - 1] = v;
+    }
+    this.dirty = next;
     if (this.activeKitIndex >= this.openKits.length) {
       this.activeKitIndex = this.openKits.length - 1;
     }

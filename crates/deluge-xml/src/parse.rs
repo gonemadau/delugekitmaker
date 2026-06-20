@@ -1,6 +1,6 @@
 use crate::{
     error::{XmlError, XmlResult},
-    kit::{Drum, Kit, OscSample},
+    kit::{Drum, Kit, OscSample, XML_TO_PAD},
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -23,7 +23,11 @@ pub fn parse_kit(xml: &str) -> XmlResult<Kit> {
 
     let mut buf = Vec::new();
     let mut kit = Kit::default();
+    // Pre-allocate the 16 UI pad slots so XML sounds can land at their mapped
+    // pad index (bottom row first in XML → pads 12..15 in the UI).
+    kit.drums = (0..16).map(|_| Drum::default()).collect();
     let mut current_drum: Option<DrumBuilder> = None;
+    let mut sound_count: usize = 0;
     let mut in_kit = false;
     let mut in_sound_sources = false;
     let mut sound_depth: u32 = 0;
@@ -77,7 +81,13 @@ pub fn parse_kit(xml: &str) -> XmlResult<Kit> {
                 let name = std::str::from_utf8(e.name().as_ref())?.to_string();
                 if name == "sound" && sound_depth > 0 {
                     if let Some(b) = current_drum.take() {
-                        kit.drums.push(b.into_drum());
+                        // Place each parsed sound at the UI pad it corresponds to,
+                        // not sequentially. Extra sounds past 16 are dropped.
+                        let pad_idx = XML_TO_PAD.get(sound_count).copied().unwrap_or(usize::MAX);
+                        if pad_idx < kit.drums.len() {
+                            kit.drums[pad_idx] = b.into_drum();
+                        }
+                        sound_count += 1;
                     }
                     sound_depth = 0;
                     path.clear();
@@ -102,7 +112,10 @@ pub fn parse_kit(xml: &str) -> XmlResult<Kit> {
         buf.clear();
     }
 
-    if !kit.firmware_version.is_empty() || !kit.drums.is_empty() {
+    // We always start with 16 empty pads now; success means we either saw a
+    // <kit> root (firmware attr or sound) or at least one drum landed.
+    let any_sound = kit.drums.iter().any(|d| d.osc1.as_ref().map(|o| !o.file_name.is_empty()).unwrap_or(false));
+    if !kit.firmware_version.is_empty() || any_sound || sound_count > 0 {
         Ok(kit)
     } else {
         Err(XmlError::NotAKit("(no <kit> root encountered)".into()))
@@ -184,16 +197,8 @@ fn apply_text(path: &[String], text: &str, b: &mut DrumBuilder) {
                 match p[2] {
                     "startSamplePos" => b.osc1_buf.start_samples = parse_u64(text),
                     "endSamplePos" => b.osc1_buf.end_samples = parse_u64(text),
-                    "startMilliseconds" => {
-                        if b.osc1_buf.start_samples == 0 {
-                            b.osc1_buf.start_samples = parse_u64(text);
-                        }
-                    }
-                    "endMilliseconds" => {
-                        if b.osc1_buf.end_samples == 0 {
-                            b.osc1_buf.end_samples = parse_u64(text);
-                        }
-                    }
+                    "startMilliseconds" => b.osc1_buf.start_ms = parse_u32(text),
+                    "endMilliseconds" => b.osc1_buf.end_ms = parse_u32(text),
                     _ => {}
                 }
             }
@@ -208,6 +213,9 @@ fn ensure_osc(b: &mut DrumBuilder) {
 }
 
 fn parse_i32(s: &str) -> i32 {
+    s.trim().parse().unwrap_or(0)
+}
+fn parse_u32(s: &str) -> u32 {
     s.trim().parse().unwrap_or(0)
 }
 fn parse_u64(s: &str) -> u64 {

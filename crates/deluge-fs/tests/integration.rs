@@ -51,10 +51,12 @@ fn end_to_end_open_kit_via_layer() {
     )
     .expect("read");
     let kit = deluge_xml::parse_kit(&xml).expect("parse");
-    assert_eq!(kit.drums.len(), 3);
-    assert_eq!(kit.drums[0].name, "Kick");
-    assert_eq!(kit.drums[1].name, "Snare");
-    assert_eq!(kit.drums[2].name, "Hat");
+    // Parser always builds a 16-slot array; XML order maps to UI pads
+    // bottom-up so the first XML sound lands at pad 12 (UI bottom-left).
+    assert_eq!(kit.drums.len(), 16);
+    assert_eq!(kit.drums[12].name, "Kick");
+    assert_eq!(kit.drums[13].name, "Snare");
+    assert_eq!(kit.drums[14].name, "Hat");
 }
 
 fn tempdir_in_target() -> PathBuf {

@@ -46,9 +46,19 @@
     }
   }
 
+  // Warn the user if they try to close the window while any kit has unsaved
+  // changes. The browser will show its native "Leave site?" dialog.
+  function onBeforeUnload(e: BeforeUnloadEvent) {
+    if (appStore.anyDirty) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  }
+
   onMount(async () => {
     await appStore.refreshAudioInfo();
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("beforeunload", onBeforeUnload);
 
     // Listen for engine step events to drive the sequencer step indicator.
     unlistenStep = await listen<{ step: number }>("engine://step", (e) => {
