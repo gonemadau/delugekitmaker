@@ -8,6 +8,7 @@
   import StatusBar from "./StatusBar.svelte";
   import SequencerStrip from "./SequencerStrip.svelte";
   import TransportBar from "./TransportBar.svelte";
+  import DragGhost from "./DragGhost.svelte";
   import { appStore } from "../stores/app.svelte";
   import { api } from "../api";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -146,6 +147,8 @@
 
   <StatusBar />
 </div>
+
+<DragGhost />
 
 {#if appStore.error}
   <div class="fixed bottom-12 right-6 max-w-md rounded-lg border border-[var(--color-accent-danger)] bg-bg-2 px-4 py-3 shadow-2xl">

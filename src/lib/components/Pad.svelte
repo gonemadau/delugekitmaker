@@ -1,25 +1,35 @@
 <script lang="ts">
   import type { Drum } from "../api";
   import { appStore } from "../stores/app.svelte";
+  import { dnd } from "../dnd.svelte";
   import { Music4, X, Plus } from "lucide-svelte";
 
   let { index, drum }: { index: number; drum: Drum | null } = $props();
 
   let pressed = $state(false);
-  let dragOver = $state(false);
 
   let hasSample = $derived(!!(drum?.osc1?.file_name && drum.osc1.file_name.length > 0));
   let displayName = $derived(drum?.name || `Pad ${index + 1}`);
   let sampleFile = $derived(drum?.osc1?.file_name ?? "");
   let sampleLabel = $derived(sampleFile ? basename(sampleFile) : "—");
   let isSelected = $derived(appStore.selectedPad === index);
+  let isDropTarget = $derived(
+    dnd.payload !== null
+      && dnd.hoverPadIndex === index
+      && !(dnd.payload.type === "pad" && dnd.payload.padIndex === index)
+  );
 
   function basename(p: string): string {
     const ix = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
     return ix >= 0 ? p.slice(ix + 1) : p;
   }
 
-  async function onClick() {
+  async function onClick(e: MouseEvent) {
+    // If user just finished a drag, suppress the click event that follows.
+    if (dnd.payload !== null || dnd.justDropped) return;
+    // Don't audition if click landed on the clear button (its own handler ran).
+    if ((e.target as Element).closest(".clear-btn")) return;
+
     if (!hasSample) {
       appStore.selectPad(index);
       await appStore.pickSampleForPad(index);
@@ -36,62 +46,28 @@
     appStore.clearPad(index);
   }
 
-  // ---- Drag and drop (HTML5, in-app) ----
-  function onDragStart(e: DragEvent) {
-    if (!hasSample) {
-      e.preventDefault();
-      return;
-    }
-    e.dataTransfer?.setData("application/x-dkm-pad", String(index));
-    e.dataTransfer?.setData("text/plain", `pad-${index}`);
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-  }
-
-  function onDragOver(e: DragEvent) {
-    const types = e.dataTransfer?.types ?? [];
-    if (types.includes("application/x-dkm-pad") || types.includes("application/x-dkm-file")) {
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = types.includes("application/x-dkm-file") ? "copy" : "move";
-      dragOver = true;
-    }
-  }
-  function onDragLeave() {
-    dragOver = false;
-  }
-  function onDrop(e: DragEvent) {
-    e.preventDefault();
-    dragOver = false;
-    const padSrc = e.dataTransfer?.getData("application/x-dkm-pad");
-    const filePath = e.dataTransfer?.getData("application/x-dkm-file");
-    if (filePath && filePath.length > 0) {
-      appStore.assignSampleToPad(index, filePath);
-      return;
-    }
-    if (padSrc !== undefined && padSrc !== "") {
-      const src = Number(padSrc);
-      if (Number.isFinite(src) && src !== index) {
-        appStore.swapPads(src, index);
-      }
-    }
+  function onPointerDown(e: PointerEvent) {
+    // Don't initiate drag from the clear button.
+    if ((e.target as Element).closest(".clear-btn")) return;
+    if (!hasSample) return; // empty pads can be drop targets but not drag sources
+    if (e.button !== 0) return;
+    dnd.begin({ type: "pad", padIndex: index }, e);
   }
 </script>
 
 <div
   role="button"
   tabindex="0"
+  data-pad-target={index}
   class="pad group relative flex aspect-square flex-col items-start justify-between rounded-xl border p-2 text-left"
   class:active={pressed}
   class:has-sample={hasSample}
   class:empty={!hasSample}
   class:selected={isSelected}
-  class:drag-over={dragOver}
-  draggable={hasSample}
+  class:drag-over={isDropTarget}
   onclick={onClick}
-  onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
-  ondragstart={onDragStart}
-  ondragover={onDragOver}
-  ondragleave={onDragLeave}
-  ondrop={onDrop}
+  onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(e as unknown as MouseEvent); } }}
+  onpointerdown={onPointerDown}
   title={hasSample ? `${displayName}\n${sampleFile}` : `Pad ${index + 1} — click to pick a sample`}
 >
   <div class="flex w-full items-center justify-between">
@@ -135,6 +111,7 @@
       background 0.18s, border-color 0.18s, box-shadow 0.18s;
     overflow: hidden;
     min-width: 0;
+    touch-action: none;
   }
   .pad.has-sample {
     background: var(--color-bg-2);
@@ -162,6 +139,7 @@
     background: color-mix(in oklch, var(--color-accent-warm) 25%, var(--color-bg-2));
     border-color: var(--color-accent-warm);
     box-shadow: 0 0 0 2px var(--color-accent-warm);
+    transform: scale(1.02);
   }
 
   .dot {

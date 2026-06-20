@@ -113,28 +113,30 @@ pub fn classify(filename: &str) -> Option<DrumCategory> {
 }
 
 /// Slot preference per category, ordered from most-to-least preferred.
-/// Layout (4×4, pad 0 = top-left, pad 15 = bottom-right):
 ///
-///   00 ClHat   01 OpHat   02 Ride    03 Crash
-///   04 Perc    05 Perc    06 Perc    07 Fx
-///   08 Clap    09 TomLo   10 TomMid  11 TomHi
-///   12 Kick    13 Kick2   14 Snare   15 Rim
+/// Layout matches Deluge convention — kicks anchor the bottom row, instruments
+/// climb upward to cymbals/FX at the top. Pad 0 = top-left, pad 15 = bottom-right.
+///
+///   00 Crash   01 Ride    02 Tom-Hi  03 FX
+///   04 HH-Cl   05 HH-Op   06 Tom-Lo  07 Tom-Mid
+///   08 Clap    09 Rim     10 Perc    11 Perc
+///   12 Kick    13 Kick2   14 Snare   15 Snare2
 pub fn slots_for(cat: DrumCategory) -> &'static [u8] {
     match cat {
         DrumCategory::Kick => &[12, 13],
         DrumCategory::Snare => &[14, 15],
-        DrumCategory::Clap => &[8, 15, 14],
-        DrumCategory::Rim => &[15, 8],
-        DrumCategory::ClHat => &[0],
-        DrumCategory::OpHat => &[1],
-        DrumCategory::TomLow => &[9],
-        DrumCategory::TomMid => &[10],
-        DrumCategory::TomHi => &[11],
-        DrumCategory::Tom => &[9, 10, 11],
-        DrumCategory::Ride => &[2],
-        DrumCategory::Crash => &[3],
-        DrumCategory::Perc => &[4, 5, 6, 7],
-        DrumCategory::Fx => &[7, 6, 5, 4],
+        DrumCategory::Clap => &[8, 9, 15],
+        DrumCategory::Rim => &[9, 8],
+        DrumCategory::ClHat => &[4],
+        DrumCategory::OpHat => &[5],
+        DrumCategory::TomLow => &[6],
+        DrumCategory::TomMid => &[7],
+        DrumCategory::TomHi => &[2],
+        DrumCategory::Tom => &[6, 7, 2],
+        DrumCategory::Ride => &[1],
+        DrumCategory::Crash => &[0],
+        DrumCategory::Perc => &[10, 11, 3],
+        DrumCategory::Fx => &[3, 11, 10],
     }
 }
 
@@ -287,10 +289,10 @@ mod tests {
         let grid = auto_layout(&names);
         assert_eq!(grid[12], Some("kick.wav".to_string()));
         assert_eq!(grid[14], Some("snare.wav".to_string()));
-        assert_eq!(grid[0], Some("hh.wav".to_string()));
-        assert_eq!(grid[1], Some("ohh.wav".to_string()));
         assert_eq!(grid[8], Some("clap.wav".to_string()));
-        assert_eq!(grid[15], Some("rim.wav".to_string()));
+        assert_eq!(grid[9], Some("rim.wav".to_string()));
+        assert_eq!(grid[4], Some("hh.wav".to_string()));
+        assert_eq!(grid[5], Some("ohh.wav".to_string()));
     }
 
     #[test]
@@ -300,15 +302,12 @@ mod tests {
         let grid = auto_layout(&names);
         assert_eq!(grid[12], Some("kick_1.wav".to_string()));
         assert_eq!(grid[13], Some("kick_2.wav".to_string()));
-        // kick_10 overflows to first empty leftover slot.
         let kick10_pos = grid.iter().position(|s| s.as_deref() == Some("kick_10.wav"));
         assert!(kick10_pos.is_some(), "kick_10 must land somewhere");
     }
 
     #[test]
-    fn priority_kicks_over_clap_for_shared_slot() {
-        // Clap also lists pad 15 as a fallback, but kicks should win their
-        // preferred slot first regardless.
+    fn priority_kicks_take_kick_slots() {
         let names: Vec<String> = ["kick.wav", "kick_2.wav"].iter().map(|s| s.to_string()).collect();
         let grid = auto_layout(&names);
         assert_eq!(grid[12], Some("kick.wav".to_string()));
@@ -323,7 +322,5 @@ mod tests {
         let grid = auto_arrange(&existing);
         assert_eq!(grid[12], Some("kick.wav".to_string()));
         assert_eq!(grid[14], Some("snare.wav".to_string()));
-        // Originals' pads are now empty
-        assert!(grid[3].is_none() || grid[3].as_deref() == Some("snare.wav"));
     }
 }

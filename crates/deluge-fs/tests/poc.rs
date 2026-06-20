@@ -67,12 +67,12 @@ fn poc_end_to_end_drop_save_reopen() {
 
     // 2. Auto-classify into a 16-pad layout.
     let layout = auto_layout(&names);
-    // Verify expected categories landed in canonical slots.
-    assert_eq!(layout[12].as_deref(), Some("kick_909.wav"), "kick→pad 12");
+    // Verify expected categories landed in canonical slots (Deluge layout).
+    assert_eq!(layout[12].as_deref(), Some("kick_909.wav"), "kick→pad 12 (bottom-left)");
     assert_eq!(layout[14].as_deref(), Some("snare_tight.wav"), "snare→pad 14");
-    assert_eq!(layout[0].as_deref(), Some("hh_closed.wav"), "closed hat→pad 0");
-    assert_eq!(layout[1].as_deref(), Some("ohh_open.wav"), "open hat→pad 1");
     assert_eq!(layout[8].as_deref(), Some("clap.wav"), "clap→pad 8");
+    assert_eq!(layout[4].as_deref(), Some("hh_closed.wav"), "closed hat→pad 4");
+    assert_eq!(layout[5].as_deref(), Some("ohh_open.wav"), "open hat→pad 5");
 
     // 3. Build a Kit using the layout and the absolute file paths from the drop dir.
     let mut kit = Kit::with_default_drums("DropPOC", 16);
@@ -112,7 +112,7 @@ fn poc_end_to_end_drop_save_reopen() {
     assert_eq!(reopened.drums.len(), 16);
     assert_eq!(reopened.drums[12].name, "kick_909");
     assert_eq!(reopened.drums[14].name, "snare_tight");
-    assert_eq!(reopened.drums[0].name, "hh_closed");
+    assert_eq!(reopened.drums[4].name, "hh_closed");
     // Sample file refs are SD-relative now.
     assert_eq!(
         reopened.drums[12].osc1.as_ref().unwrap().file_name,

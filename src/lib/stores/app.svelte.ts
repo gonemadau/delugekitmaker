@@ -272,42 +272,115 @@ class AppStore {
 
   /// Remove the sample from a pad (leaves the pad in place but empty).
   clearPad(padIndex: number) {
+    try {
+      const kit = this.activeKit;
+      if (!kit) return;
+      if (padIndex < 0 || padIndex >= kit.drums.length) return;
+      // Stop any in-flight voices on this pad before tearing the sample reference
+      // out of the kit, so the audio engine never tries to retrigger from a stale
+      // reference mid-clear.
+      void api.stopAll().catch(() => {});
+      kit.drums[padIndex] = {
+        name: `Pad ${padIndex + 1}`,
+        osc1: null,
+        volume_hex: null,
+        pan_hex: null,
+      };
+      // Also clear any sequencer steps for this pad so we don't keep triggering.
+      const steps = this.patternGrid[padIndex];
+      if (steps && steps.some((on) => on)) {
+        const next = this.patternGrid.slice();
+        next[padIndex] = Array.from({ length: 16 }, () => false);
+        this.patternGrid = next;
+        void this.pushPattern();
+      }
+      this.bumpActiveKit();
+    } catch (e: any) {
+      console.warn("clearPad failed", e);
+      this.error = `clear: ${String(e?.msg ?? e?.message ?? e)}`;
+    }
+  }
+
+  /// Audition a sample file directly (used by the file browser preview).
+  async auditionFile(absPath: string) {
+    try {
+      let id = this.sampleIds.get(absPath);
+      if (!id) {
+        id = await api.decodeSample(absPath);
+        this.sampleIds.set(absPath, id);
+      }
+      // Use pad index 99 so this preview never clashes with sequenced pads.
+      await api.auditionPad(99, id, { volume: 0.85 });
+    } catch (e: any) {
+      console.warn("preview audition failed", e);
+    }
+  }
+
+  /// Place a list of file paths into the active kit using the classifier's
+  /// priority order. Skips slots that already have samples (additive behaviour).
+  async addFilesToKit(absPaths: string[]) {
+    if (absPaths.length === 0) return;
     const kit = this.activeKit;
     if (!kit) return;
-    if (padIndex < 0 || padIndex >= kit.drums.length) return;
-    kit.drums[padIndex] = {
-      name: `Pad ${padIndex + 1}`,
-      osc1: null,
-      volume_hex: null,
-      pan_hex: null,
-    };
-    this.bumpActiveKit();
+    try {
+      const imported = await api.importDroppedPaths(absPaths);
+      // Build a working layout: existing pads + new ones. New ones fill
+      // empty slots first by the classifier's pad_index, then overflow to
+      // any other empty pad in scan order.
+      const emptyByPref: Set<number> = new Set();
+      for (let i = 0; i < kit.drums.length; i++) {
+        if (!kit.drums[i].osc1?.file_name) emptyByPref.add(i);
+      }
+      const overflow: string[] = [];
+      for (const s of imported) {
+        const wanted = s.pad_index ?? -1;
+        if (wanted >= 0 && emptyByPref.has(wanted)) {
+          this.assignSampleToPad(wanted, s.abs_path);
+          emptyByPref.delete(wanted);
+        } else {
+          overflow.push(s.abs_path);
+        }
+      }
+      for (const path of overflow) {
+        const next = [...emptyByPref][0];
+        if (next === undefined) break;
+        this.assignSampleToPad(next, path);
+        emptyByPref.delete(next);
+      }
+    } catch (e: any) {
+      this.error = `add: ${String(e?.msg ?? e)}`;
+    }
   }
 
   /// Assign an absolute on-disk WAV path to a pad. If the pad already has a
   /// sample, it's overwritten.
   assignSampleToPad(padIndex: number, absPath: string) {
-    const kit = this.activeKit;
-    if (!kit) return;
-    if (padIndex < 0 || padIndex >= kit.drums.length) return;
-    const baseName = absPath.split(/[\\/]/).pop() ?? "sample";
-    const stem = baseName.replace(/\.[Ww][Aa][Vv]$/, "");
-    kit.drums[padIndex] = {
-      name: stem,
-      osc1: {
-        file_name: absPath,
-        start_samples: 0,
-        end_samples: 0,
-        transpose: 0,
-        cents: 0,
-        reversed: false,
-        loop_mode: 0,
-      },
-      volume_hex: null,
-      pan_hex: null,
-    };
-    this.bumpActiveKit();
-    this.selectedPad = padIndex;
+    try {
+      const kit = this.activeKit;
+      if (!kit) return;
+      if (padIndex < 0 || padIndex >= kit.drums.length) return;
+      const baseName = absPath.split(/[\\/]/).pop() ?? "sample";
+      const stem = baseName.replace(/\.[Ww][Aa][Vv]$/, "");
+      kit.drums[padIndex] = {
+        name: stem,
+        osc1: {
+          file_name: absPath,
+          start_samples: 0,
+          end_samples: 0,
+          transpose: 0,
+          cents: 0,
+          reversed: false,
+          loop_mode: 0,
+        },
+        volume_hex: null,
+        pan_hex: null,
+      };
+      this.bumpActiveKit();
+      this.selectedPad = padIndex;
+    } catch (e: any) {
+      console.warn("assignSampleToPad failed", e);
+      this.error = `assign: ${String(e?.msg ?? e?.message ?? e)}`;
+    }
   }
 
   /// Open the OS file picker and assign the chosen WAV to the given pad.

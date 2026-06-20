@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { appStore } from "../stores/app.svelte";
 
   const STEPS = 16;
-  // Show only pads that have a sample, to keep the strip useful.
+
   let kitPads = $derived(() => {
     const kit = appStore.activeKit;
     if (!kit) return [] as number[];
@@ -10,7 +11,6 @@
     for (let i = 0; i < Math.min(16, kit.drums.length); i++) {
       if (kit.drums[i].osc1?.file_name) out.push(i);
     }
-    // Always include at least 4 rows so the grid feels intentional even on an empty kit.
     while (out.length < 4 && out.length < 16) {
       const next = out.length;
       if (!out.includes(next)) out.push(next);
@@ -19,50 +19,68 @@
   });
 
   // Drag-paint state.
-  let painting = $state<{ mode: "on" | "off"; padIdx: number } | null>(null);
-  let dragMoved = $state(false);
+  let painting: { mode: "on" | "off"; padIdx: number; pointerId: number } | null = null;
 
-  function isOn(p: number, s: number): boolean {
-    return appStore.patternGrid[p][s] === true;
-  }
-  function vel(p: number, s: number): number {
-    return appStore.velocityGrid[p][s];
-  }
-  function isAccent(p: number, s: number): boolean {
-    return isOn(p, s) && vel(p, s) >= 120;
+  function isOn(p: number, s: number): boolean { return appStore.patternGrid[p][s] === true; }
+  function vel(p: number, s: number): number { return appStore.velocityGrid[p][s]; }
+  function isAccent(p: number, s: number): boolean { return isOn(p, s) && vel(p, s) >= 120; }
+
+  function paintAt(p: number, s: number) {
+    if (!painting) return;
+    if (painting.padIdx !== p) return; // single-row paint
+    const wantOn = painting.mode === "on";
+    if (appStore.patternGrid[p][s] === wantOn) return; // no-op, avoid redundant pushPattern
+    appStore.setStep(p, s, wantOn, wantOn ? 100 : undefined);
   }
 
-  function cellPointerDown(e: PointerEvent, p: number, s: number) {
-    e.preventDefault();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    const altOrRight = e.altKey || e.button === 2;
-    if (altOrRight) {
+  function onCellPointerDown(e: PointerEvent, p: number, s: number) {
+    // Right-click or alt-click = toggle accent on this step
+    if (e.button === 2 || e.altKey) {
+      e.preventDefault();
       appStore.toggleAccent(p, s);
-      painting = null;
       return;
     }
-    const wasOn = isOn(p, s);
-    const mode: "on" | "off" = wasOn ? "off" : "on";
-    painting = { mode, padIdx: p };
-    dragMoved = false;
-    appStore.setStep(p, s, mode === "on", mode === "on" ? 100 : undefined);
-  }
-
-  function cellPointerEnter(_e: PointerEvent, p: number, s: number) {
-    if (!painting) return;
-    if (painting.padIdx !== p) return; // restrict paint to single row to avoid accidents
-    dragMoved = true;
-    appStore.setStep(p, s, painting.mode === "on", painting.mode === "on" ? 100 : undefined);
-  }
-
-  function cellPointerUp(_e: PointerEvent) {
-    painting = null;
-  }
-
-  function onContextMenu(e: MouseEvent) {
-    // Suppress native context menu so right-click can be used for accents.
+    if (e.button !== 0) return;
     e.preventDefault();
+    const wasOn = isOn(p, s);
+    painting = { mode: wasOn ? "off" : "on", padIdx: p, pointerId: e.pointerId };
+    paintAt(p, s);
+    // Force-handle the very first cell (paintAt early-returns if same state — but we
+    // want to actually toggle this one because it's the user's intentional click).
+    if (wasOn) {
+      appStore.setStep(p, s, false);
+    } else {
+      appStore.setStep(p, s, true, 100);
+    }
+    window.addEventListener("pointermove", onWinPointerMove);
+    window.addEventListener("pointerup", onWinPointerUp);
+    window.addEventListener("pointercancel", onWinPointerUp);
   }
+
+  function onWinPointerMove(e: PointerEvent) {
+    if (!painting || e.pointerId !== painting.pointerId) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    if (!el) return;
+    const cell = el.closest("[data-step-cell]") as HTMLElement | null;
+    if (!cell) return;
+    const p = Number(cell.dataset.pad);
+    const s = Number(cell.dataset.step);
+    if (!Number.isFinite(p) || !Number.isFinite(s)) return;
+    paintAt(p, s);
+  }
+
+  function onWinPointerUp(_e: PointerEvent) {
+    painting = null;
+    window.removeEventListener("pointermove", onWinPointerMove);
+    window.removeEventListener("pointerup", onWinPointerUp);
+    window.removeEventListener("pointercancel", onWinPointerUp);
+  }
+
+  onDestroy(() => {
+    window.removeEventListener("pointermove", onWinPointerMove);
+    window.removeEventListener("pointerup", onWinPointerUp);
+    window.removeEventListener("pointercancel", onWinPointerUp);
+  });
 
   function labelFor(padIndex: number): string {
     const kit = appStore.activeKit;
@@ -90,7 +108,7 @@
     >clear</button>
   </div>
   {#each kitPads() as p (p)}
-    <div class="flex items-center gap-1" data-pad={p}>
+    <div class="flex items-center gap-1" data-pad-row={p}>
       <span class="w-14 flex-shrink-0 truncate text-right text-[10px] text-text-muted" title={labelFor(p)}>
         {labelFor(p)}
       </span>
@@ -102,10 +120,10 @@
             class:accent={isAccent(p, s)}
             class:beat={s % 4 === 0}
             class:playing={appStore.playing && appStore.currentStep === s}
-            onpointerdown={(ev) => cellPointerDown(ev, p, s)}
-            onpointerenter={(ev) => cellPointerEnter(ev, p, s)}
-            onpointerup={cellPointerUp}
-            onpointercancel={cellPointerUp}
+            data-step-cell="1"
+            data-pad={p}
+            data-step={s}
+            onpointerdown={(ev) => onCellPointerDown(ev, p, s)}
             oncontextmenu={(ev) => { ev.preventDefault(); appStore.toggleAccent(p, s); }}
             aria-label={`pad ${p + 1} step ${s + 1}`}
             title={`pad ${p + 1} step ${s + 1}${isOn(p, s) ? ` (vel ${vel(p, s)})` : ""}`}
@@ -128,6 +146,7 @@
     transition: background 0.1s, transform 0.06s, box-shadow 0.1s;
     padding: 0;
     touch-action: none;
+    user-select: none;
   }
   .step-cell.beat {
     border-color: color-mix(in oklch, var(--color-border) 60%, var(--color-text-muted));
