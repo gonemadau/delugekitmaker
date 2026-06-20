@@ -1,0 +1,29 @@
+# Rust
+/target
+/src-tauri/target
+/src-tauri/gen
+
+# Node
+/node_modules
+/dist
+/build
+pnpm-debug.log*
+npm-debug.log*
+
+# Generated / runtime
+/poc-artifacts
+**/settings.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log

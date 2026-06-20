@@ -1,0 +1,12 @@
+[package]
+name = "deluge-xml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+quick-xml = { workspace = true }
+thiserror = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }

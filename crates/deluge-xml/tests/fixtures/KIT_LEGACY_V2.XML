@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+	<firmwareVersion>2.1.0</firmwareVersion>
+	<kit>
+	<lpfMode>24dB</lpfMode>
+	<soundSources>
+		<sound>
+			<name>OldKick</name>
+		</sound>
+	</soundSources>
+</kit>

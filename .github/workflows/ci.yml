@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  rust-tests:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: cargo check (workspace minus tauri shell)
+        run: cargo check -p deluge-xml -p deluge-audio -p deluge-fs -p deluge-classify --all-targets
+
+      - name: cargo test (workspace minus tauri shell)
+        run: cargo test -p deluge-xml -p deluge-audio -p deluge-fs -p deluge-classify
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: type-check
+        run: pnpm exec svelte-check --tsconfig ./tsconfig.json --threshold warning
+
+      - name: build
+        run: pnpm build
